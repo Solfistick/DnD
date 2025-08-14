@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <title>DnD s Vypravěčem</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Josefin+Sans&display=swap" rel="stylesheet">
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%; overflow: hidden;
+      background: linear-gradient(135deg, #2c3e50, #4ca1af);
+      font-family: 'Josefin Sans', sans-serif;
+      color: #f2f2f2;
+    }
+    #overlay {
+      background: rgba(0, 0, 0, 0.7);
+      width: 100%; height: 100%;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-start;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    h1 {
+      font-family: 'Cinzel', serif;
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      text-shadow: 2px 2px 4px #000;
+    }
+    /* LOBBY */
+    #lobby {
+      margin-top: 30px;
+    }
+    input, button, select, textarea {
+      font-size: 1rem; border: none;
+      padding: 8px; margin: 5px;
+      border-radius: 4px;
+      outline: none;
+    }
+    button {
+      background: #e67e22; color: #fff;
+      cursor: pointer; transition: background .2s;
+    }
+    button:hover {
+      background: #d35400;
+    }
+    input, select, textarea {
+      background: #ecf0f1; color: #2c3e50;
+    }
+    /* HRACÍ OBRAZOVKA */
+    #game {
+      display: none;
+      width: 100%; max-width: 900px;
+      flex: 1; display: flex;
+      flex-direction: column;
+    }
+    #narratorControls {
+      display: none;
+      margin-bottom: 10px;
+    }
+    #narratorControls textarea {
+      width: 100%; height: 60px;
+      resize: none;
+    }
+    #chatWindow {
+      flex: 1; width: 100%;
+      background: rgba(236, 240, 241, 0.8);
+      border-radius: 6px;
+      padding: 10px;
+      box-sizing: border-box;
+      display: flex; flex-direction: column;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    .message {
+      max-width: 70%;
+      padding: 8px 12px;
+      border-radius: 12px;
+      margin: 5px 0;
+      display: inline-block;
+      word-wrap: break-word;
+    }
+    .self { background: #3498db; align-self: flex-end; }
+    .other { background: #2ecc71; align-self: flex-start; }
+    .narration {
+      background: rgba(231, 76, 60, 0.8);
+      font-style: italic;
+      text-align: center;
+      border-radius: 6px;
+      margin: 10px auto;
+      padding: 6px 10px;
+    }
+    #controls {
+      display: flex; align-items: center; flex-wrap: wrap;
+    }
+    #controls select { width: 70px; }
+    #controls button, #controls input {
+      flex: 1; min-width: 100px;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <h1>DnD s Vypravěčem</h1>
+
+    <!-- LOBBY -->
+    <div id="lobby">
+      <input id="nameInput" placeholder="Vaše jméno">
+      <button id="hostBtn">Host Game</button>
+      <input id="hostIdInput" placeholder="Host ID">
+      <button id="connectBtn">Join Game</button>
+      <p id="yourId"></p>
+    </div>
+
+    <!-- HRACÍ OBRAZOVKA -->
+    <div id="game">
+      <!-- PANEL PRO VYPRAVĚČE -->
+      <div id="narratorControls">
+        <textarea id="narrationInput" placeholder="Sem napište příběh..."></textarea>
+        <button id="sendNarrationBtn">Poslat vyprávění</button>
+      </div>
+
+      <!-- CHAT & NARRACE -->
+      <div id="chatWindow"></div>
+
+      <!-- OVLÁDACÍ PRVKY -->
+      <div id="controls">
+        <input id="chatInput" placeholder="Napište zprávu">
+        <button id="sendChatBtn">Odeslat</button>
+        <select id="diceSelect">
+          <option value="4">d4</option>
+          <option value="6">d6</option>
+          <option value="8">d8</option>
+          <option value="10">d10</option>
+          <option value="12">d12</option>
+          <option value="20" selected>d20</option>
+        </select>
+        <button id="rollBtn">🎲 Hod kostkou</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.2/dist/peerjs.min.js"></script>
+  <script>
+    let peer, connections = [], connToHost, myId, myName, isHost = false;
+    // UI
+    const nameInput    = document.getElementById('nameInput');
+    const hostBtn      = document.getElementById('hostBtn');
+    const hostIdInput  = document.getElementById('hostIdInput');
+    const connectBtn   = document.getElementById('connectBtn');
+    const yourIdP      = document.getElementById('yourId');
+    const lobby        = document.getElementById('lobby');
+    const gameDiv      = document.getElementById('game');
+    const chatWindow   = document.getElementById('chatWindow');
+    const chatInput    = document.getElementById('chatInput');
+    const sendChatBtn  = document.getElementById('sendChatBtn');
+    const diceSelect   = document.getElementById('diceSelect');
+    const rollBtn      = document.getElementById('rollBtn');
+    const narratorCtr  = document.getElementById('narratorControls');
+    const narrationIn  = document.getElementById('narrationInput');
+    const sendNarrationBtn = document.getElementById('sendNarrationBtn');
+
+    // HOST
+    hostBtn.onclick = () => {
+      myName = nameInput.value.trim() || 'Vypravěč';
+      peer   = new Peer();
+      peer.on('open', id => {
+        myId = id; isHost = true;
+        yourIdP.textContent = 'Host ID: ' + id;
+        startAsHost();
+      });
+      peer.on('error', console.error);
+    };
+
+    function startAsHost() {
+      lobby.style.display       = 'none';
+      gameDiv.style.display     = 'flex';
+      narratorCtr.style.display = 'block'; // povolit vypravěče
+
+      peer.on('connection', conn => {
+        connections.push(conn);
+        conn.on('data', data => {
+          handleData(data);
+          broadcast(data);
+        });
+      });
+    }
+
+    // CLIENT
+    connectBtn.onclick = () => {
+      myName = nameInput.value.trim() || 'Hráč';
+      const hostId = hostIdInput.value.trim();
+      if (!hostId) return alert('Zadej Host ID');
+      peer = new Peer();
+      peer.on('open', id => {
+        myId = id;
+        connToHost = peer.connect(hostId);
+        connToHost.on('open', () => startAsClient());
+        connToHost.on('data', handleData);
+        connToHost.on('error', console.error);
+      });
+      peer.on('error', console.error);
+    };
+
+    function startAsClient() {
+      lobby.style.display   = 'none';
+      gameDiv.style.display = 'flex';
+    }
+
+    // SEND CHAT
+    sendChatBtn.onclick = () => {
+      const text = chatInput.value.trim(); if (!text) return;
+      const data = { type:'chat', name:myName, text };
+      if (isHost) handleData(data);
+      sendData(data);
+      chatInput.value = '';
+    };
+
+    // SEND ROLL
+    rollBtn.onclick = () => {
+      const die    = +diceSelect.value;
+      const result = Math.floor(Math.random()*die)+1;
+      const data   = { type:'roll', name:myName, dice:die, result };
+      if (isHost) handleData(data);
+      sendData(data);
+    };
+
+    // SEND NARRATION
+    sendNarrationBtn.onclick = () => {
+      const text = narrationIn.value.trim(); if (!text) return;
+      const data = { type:'narration', text };
+      handleData(data);
+      broadcast(data);
+      narrationIn.value = '';
+    };
+
+    // HANDLE INCOMING
+    function handleData(data) {
+      if (data.type === 'chat') {
+        appendMsg(`${data.name}: ${data.text}`, data.name===myName ? 'self' : 'other');
+      }
+      else if (data.type === 'roll') {
+        appendMsg(`${data.name} hodil d${data.dice}: ${data.result}`, 'other');
+      }
+      else if (data.type === 'narration') {
+        appendNarration(data.text);
+      }
+    }
+
+    // TRANSMIT
+    function sendData(data) {
+      if (isHost) broadcast(data);
+      else if (connToHost && connToHost.open) connToHost.send(data);
+    }
+    function broadcast(data) {
+      connections.forEach(c => c.open && c.send(data));
+    }
+
+    // APPENDERS
+    function appendMsg(text, cls) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      div.className = `message ${cls}`;
+      chatWindow.appendChild(div);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+    function appendNarration(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      div.className = 'narration';
+      chatWindow.appendChild(div);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+  </script>
+</body>
+</html>
